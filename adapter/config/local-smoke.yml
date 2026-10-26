@@ -1,0 +1,25 @@
+# 只验证 HTTP→真实 mem2.0→检索调用链，不用于成绩评测。
+# 进程内索引重启后会从适配器请求日志按需重建。
+globals:
+  vector_enabled: false
+  graph_enabled: false
+  rerank_enabled: false
+  layers_index_enabled: false
+  log_level: WARNING
+  chunk_size: 4096
+extractor:
+  default:
+    target: keyword
+    params: {chunker: default}
+evolver:
+  default:
+    target: orchestrating
+    params: {extractor: default, index_builder: default, message_store: default, dedup: default, llm: default}
+dedup:
+  default:
+    target: keyword
+    params: {tokenizer: default}
+query_parser:
+  default:
+    target: simple
+    params: {tokenizer: default, llm: default, feature_extractor: default, rewrite_enabled: false, sanitize_enabled: false}

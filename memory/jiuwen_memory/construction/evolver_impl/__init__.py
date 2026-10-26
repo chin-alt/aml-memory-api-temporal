@@ -1,0 +1,13 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+"""evolver_impl 实现集：工厂 EvolverProducer + 各实现。
+
+import 各实现模块即触发其 ``@EvolverProducer.register(...)`` 自注册；本包只对外暴露工厂 EvolverProducer。
+"""
+
+from jiuwen_memory.common._import_support import import_optional
+from jiuwen_memory.construction.evolver import EvolverProducer
+
+import_optional(".orchestrating_evolver", __name__)
+import_optional(".dynamic_evolver", __name__)
+
+__all__ = ["EvolverProducer"]

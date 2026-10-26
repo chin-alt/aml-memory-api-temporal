@@ -1,0 +1,153 @@
+﻿name: ${COMPOSE_PROJECT_NAME:-aml-memory}
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${AML_API_IMAGE:-aml-memory-api-temporal:local}
+    env_file: ${AML_SERVER_ENV_FILE:-server.env}
+    environment:
+      AML_STATE_DIR: /app/state
+      AML_MEMORY_CONFIG: /app/runtime/memory.yml
+      AML_REDIS_URL: redis://redis:6379/0
+      AML_ES_URL: http://elasticsearch:9200
+      AML_MILVUS_URI: http://milvus:19530
+    ports:
+      - "127.0.0.1:${AML_API_PORT:-8000}:8000"
+    volumes:
+      - api-state:/app/state
+    depends_on:
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    stop_grace_period: 31m
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  elasticsearch:
+    image: ${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.15.0}
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms2g -Xmx2g}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      interval: 15s
+      timeout: 8s
+      retries: 30
+      start_period: 45s
+    restart: unless-stopped
+
+  etcd:
+    image: ${ETCD_IMAGE:-quay.io/coreos/etcd:v3.5.5}
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command:
+      - etcd
+      - -advertise-client-urls=http://127.0.0.1:2379
+      - -listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2023-03-20T20-16-18Z}
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: minio server /minio_data
+    volumes:
+      - minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  milvus:
+    image: ${MILVUS_IMAGE:-milvusdb/milvus:v2.4.13}
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - milvus-data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9091/healthz"]
+      interval: 15s
+      timeout: 8s
+      retries: 30
+      start_period: 45s
+    restart: unless-stopped
+
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2.8.4-alpine}
+    profiles: ["public"]
+    environment:
+      AML_PUBLIC_DOMAIN: ${AML_PUBLIC_DOMAIN:?set AML_PUBLIC_DOMAIN when enabling the public profile}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  api-state:
+  redis-data:
+  elasticsearch-data:
+  etcd-data:
+  minio-data:
+  milvus-data:
+  caddy-data:
+  caddy-config:
+

@@ -1,0 +1,12 @@
+# 普通主链路联合实验：保留基线通道权重，只替换融合器并启用写入保真。
+globals:
+  extraction_fidelity_mode: true
+fuser:
+  default:
+    target: BM25_scored_fuser
+    params:
+      tokenizer: default
+      bm25_k1: 1.2
+      bm25_b: 0.75
+      bm25_lexical_weight: 1.0
+      fusion_channel_weights: {vector: 2.0, keyword: 1.0}

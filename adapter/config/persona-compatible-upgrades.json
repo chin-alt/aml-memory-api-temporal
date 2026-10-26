@@ -1,0 +1,58 @@
+[
+  {
+    "memory_profile": "ordinary",
+    "from": "aae9c8d33c1ea51a3b9f247f2d10d665cb8c5d59ae141ec0622c39d784b4624a",
+    "to": "7bf730905e81ef3616c31242302c299f1d9ec86e502dfd47957f76d7f36f9447",
+    "date": "2026-10-08",
+    "reason": "Add one shared JSON/candidate validation repair; preserve completed PersonaMem QA and ingestion checkpoints. Exact predecessor verified before editing; QA rules and source/model configuration unchanged."
+  },
+  {
+    "memory_profile": "ordinary",
+    "from": "7bf730905e81ef3616c31242302c299f1d9ec86e502dfd47957f76d7f36f9447",
+    "to": "04768b7335464f4b190211161641174b00f7ac6ad444d2975d197d9015b869e5",
+    "date": "2026-10-08",
+    "reason": "Increase local Memory HTTP read budget to configurable 4h, print wait progress, keep Ctrl+C responsive, and restart owned API after history transport failure before next user. Preserve completed QA and persisted history; model/QA settings unchanged."
+  },
+  {
+    "memory_profile": "ordinary",
+    "from": "04768b7335464f4b190211161641174b00f7ac6ad444d2975d197d9015b869e5",
+    "to": "89e80a70ab12025523e122ba4a46c5cce341a65b6e47007abba89b330c500893",
+    "date": "2026-10-08",
+    "reason": "Optional multi-cutoff PersonaMem entry point; legacy single-cutoff behavior unchanged. Preserve existing ordinary history and QA checkpoints; opt-in multi-cutoff runs require a new batch."
+  },
+  {
+    "memory_profile": "ordinary",
+    "from": "04768b7335464f4b190211161641174b00f7ac6ad444d2975d197d9015b869e5",
+    "to": "1dee3a0521e61bbcaa21d466af12afe1b44145141bf65287caeb8cfb7abffe8e",
+    "date": "2026-10-09",
+    "reason": "Optional same-persona expansion, preserving old questions and QA artifacts; existing run behavior unchanged until explicit ExtendPerUser. Exact predecessor verified before editing."
+  },
+  {
+    "memory_profile": "ordinary",
+    "from": "89e80a70ab12025523e122ba4a46c5cce341a65b6e47007abba89b330c500893",
+    "to": "1dee3a0521e61bbcaa21d466af12afe1b44145141bf65287caeb8cfb7abffe8e",
+    "date": "2026-10-09",
+    "reason": "Optional same-persona expansion, preserving old questions and QA artifacts; existing run behavior unchanged until explicit ExtendPerUser. Exact predecessor verified before editing."
+  },
+  {
+    "memory_profile": "schema-entity",
+    "from": "25ef3a122a63d0003e0e69df10cd40a6e063ad6d33304871742072390da63868",
+    "to": "e6e36c928607dea6eabdc24af968dca32d394d5fe92323d7da683e81e8f8747c",
+    "date": "2026-10-09",
+    "reason": "Optional same-persona expansion, preserving old questions and QA artifacts; existing run behavior unchanged until explicit ExtendPerUser. Exact predecessor verified before editing."
+  },
+  {
+    "memory_profile": "ordinary",
+    "from": "7e3e083ddebb7e1db8f942d4bf897648cccabfd6236b2239813a1390704692a8",
+    "to": "5d153ccb70985c18151f3b2d5750c9ab46a52ea7100c6c4453bdba36f6924888",
+    "date": "2026-10-09",
+    "reason": "Explicitly send enable_thinking=false for all PersonaMem Answer/Judge requests. Preserve cached QA, Search and ingestion checkpoints; official prompts/scoring unchanged. Old cached results used gateway defaults: this resumed batch mixes request policies; no retrospective regrading."
+  },
+  {
+    "memory_profile": "schema-entity",
+    "from": "8697c20e2516b33c25caadd30c6c711c513908c03190af96f4ab8201f324d5a3",
+    "to": "abfc156e61c153b0c689f95c7d699c1bd3f3c4b06f7ca2ee9e4cf065080177fc",
+    "date": "2026-10-09",
+    "reason": "Explicitly send enable_thinking=false for all PersonaMem Answer/Judge requests. Preserve cached QA, Search and ingestion checkpoints; official prompts/scoring unchanged. Old cached results used gateway defaults: this resumed batch mixes request policies; no retrospective regrading."
+  }
+]

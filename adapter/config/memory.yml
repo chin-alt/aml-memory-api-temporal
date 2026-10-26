@@ -1,0 +1,103 @@
+# 普通同步文本主链路；模型服务可远程调用。不要直接套 LME 的 no-source 补丁。
+globals:
+  vector_enabled: true
+  graph_enabled: false
+  rerank_enabled: false
+  layers_index_enabled: false
+  schema_enabled: false
+  entity_enabled: false
+  embedder_dim: 1024
+  chunk_size: 1024
+  log_level: WARNING
+  llm_model: "${AML_LLM_MODEL:-gpt-4o-mini}"
+  llm_base_url: "${AML_LLM_BASE_URL}"
+  llm_api_key: "${AML_LLM_API_KEY}"
+  llm_temperature: 0.0
+  llm_max_tokens: 8192
+  llm_timeout: 120
+  llm_max_retries: 1
+  llm_ssl_verify: "${AML_LLM_SSL_VERIFY:-true}"
+  embedder_model: "${AML_EMBED_MODEL:-text-embedding-v4}"
+  embedder_base_url: "${AML_EMBED_BASE_URL}"
+  embedder_api_key: "${AML_EMBED_API_KEY}"
+  embedder_max_batch: 10
+  embedder_timeout: 60
+  embedder_max_retries: 1
+  embedder_ssl_verify: "${AML_EMBED_SSL_VERIFY:-true}"
+llm:
+  default:
+    target: "${AML_LLM_PROVIDER:-openai}"
+    params: {enable_thinking: false}
+embedder:
+  default: {target: openai}
+tokenizer:
+  default: {target: jieba}
+extractor:
+  default:
+    target: llm
+    params: {llm: default, chunker: default, extract_batch_size: 10}
+evolver:
+  default:
+    target: orchestrating
+    params:
+      extractor: default
+      index_builder: default
+      message_store: default
+      dedup: default
+      llm: default
+constructor:
+  default:
+    target: hybrid
+    params: {chunker: default, embedder: default}
+kv_store:
+  default:
+    target: redis
+    params: {url: "${AML_REDIS_URL}"}
+fulltext_store:
+  default:
+    target: elasticsearch
+    params:
+      hosts: "${AML_ES_URL}"
+      index: "${AML_ES_INDEX:-aml_text_v1}"
+      refresh: "wait_for"
+vector_store:
+  default:
+    target: milvus
+    params:
+      uri: "${AML_MILVUS_URI}"
+      collection: "${AML_MILVUS_COLLECTION:-aml_text_v1}"
+      dim: 1024
+      metric_type: COSINE
+      consistency_level: Strong
+query_parser:
+  default:
+    target: simple
+    params:
+      tokenizer: default
+      embedder: default
+      feature_extractor: default
+      llm: {target: echo}
+      rewrite_enabled: false
+      sanitize_enabled: false
+fuser:
+  default:
+    target: weighted_rrf
+    params:
+      fusion_rrf_k: 20
+      fusion_channel_weights: {vector: 2.0, keyword: 1.0}
+retriever:
+  default:
+    target: pipeline
+    params:
+      query_parser: default
+      fuser: default
+      reranker: default
+      discloser: default
+      over_fetch_factor: 4
+      over_fetch_floor: 60
+      recall_max: 400
+      rerank_max: 100
+      min_score: 0.0
+      min_score_ratio: 0.0
+      min_score_ratio_uncalibrated: 0.0
+      min_results: 0

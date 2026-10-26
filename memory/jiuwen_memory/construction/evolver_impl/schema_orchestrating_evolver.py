@@ -1,0 +1,344 @@
+"""Source-first orchestration for the opt-in Entity Schema extractor.
+
+The official :class:`OrchestratingEvolver` remains unchanged. This extension only
+overrides the non-procedural EXTRACT route so raw evidence is durable before the
+fallible LLM extraction. Accepted Schema properties bypass ordinary similarity deduplication and
+run through canonical entity resolution plus the Schema-specific Property Merge planner.
+"""
+
+from __future__ import annotations
+
+import copy
+from collections.abc import Callable
+
+from jiuwen_memory.common._support import as_bool
+from jiuwen_memory.common.embedder.base import EmbedderProducer
+from jiuwen_memory.common.errors import ValidationError
+from jiuwen_memory.common.llm.base import LLM, LlmProducer
+from jiuwen_memory.common.log import get_logger
+from jiuwen_memory.common.type_def import MemoryUnit
+from jiuwen_memory.construction.abstractor import Abstractor, AbstractorProducer
+from jiuwen_memory.construction.associator import Associator, AssociatorProducer
+from jiuwen_memory.construction.common import merge_unit_tags
+from jiuwen_memory.construction.dedup import Dedup, DedupProducer
+from jiuwen_memory.construction.evolver import EvolveResult, EvolverProducer
+from jiuwen_memory.construction.evolver_impl.orchestrating_evolver import (
+    OrchestratingEvolver,
+    _resolve_message_store,
+)
+from jiuwen_memory.construction.evolver_impl.schema_entity_registry import SchemaEntityRegistry
+from jiuwen_memory.construction.evolver_impl.schema_entity_resolver import SchemaEntityResolver
+from jiuwen_memory.construction.evolver_impl.schema_property_merge import (
+    SchemaPropertyMergeExecutor,
+    SchemaPropertyMergePlanner,
+)
+from jiuwen_memory.construction.evolver_impl.schema_update import SchemaUpdateCoordinator
+from jiuwen_memory.construction.extractor import Extractor, ExtractorProducer
+from jiuwen_memory.construction.index_builder import IndexBuilder, IndexBuilderProducer
+from jiuwen_memory.construction.layer_annotator import LayerAnnotator, LayerAnnotatorProducer
+from jiuwen_memory.construction.prompt_strategy import copy_consolidation_prompts
+from jiuwen_memory.construction.source_update import (
+    SourceExtraction,
+    SourceUpdatePlan,
+    SourceUpdateSupport,
+)
+from jiuwen_memory.storage.kv import KVStore, load_units
+from jiuwen_memory.storage.store_manager import (
+    StoreManager,
+    StoreManagerProducer,
+    resolve_name,
+)
+from jiuwen_memory.storage.types import IndexWriteMode
+
+logger = get_logger(__name__)
+
+
+class SchemaOrchestratingEvolver(OrchestratingEvolver, SourceUpdateSupport):
+    """Persist Source first, then resolve, evolve, and update Schema properties."""
+
+    def __init__(
+        self,
+        extractor: Extractor,
+        abstractor: Abstractor,
+        associator: Associator,
+        index_builder: IndexBuilder,
+        storage: StoreManager,
+        message_store: KVStore,
+        dedup: Dedup,
+        llm: LLM,
+        layer_annotator: LayerAnnotator | None = None,
+        schema_entity_resolver: SchemaEntityResolver | None = None,
+        schema_property_merge_planner: SchemaPropertyMergePlanner | None = None,
+        *,
+        kv_name: str = "default",
+        dedup_medium_similarity: float = 0.7,
+        dedup_high_similarity: float = 0.9,
+    ) -> None:
+        super().__init__(
+            extractor=extractor,
+            abstractor=abstractor,
+            associator=associator,
+            index_builder=index_builder,
+            storage=storage,
+            message_store=message_store,
+            dedup=dedup,
+            llm=llm,
+            layer_annotator=layer_annotator,
+            dedup_medium_similarity=dedup_medium_similarity,
+            dedup_high_similarity=dedup_high_similarity,
+        )
+        # IndexBuilder owns memory writes; KV is used only to read source/property records.
+        self._source_kv = storage.kv(kv_name)
+        self._schema_entity_resolver = schema_entity_resolver
+        self._schema_property_merge_planner = schema_property_merge_planner
+        self._schema_property_merge_executor = (
+            SchemaPropertyMergeExecutor(index_builder)
+            if schema_property_merge_planner is not None
+            else None
+        )
+        self._updates = SchemaUpdateCoordinator(self._source_kv, self._extract_source_update)
+
+    def _extract_source_update(self, source: MemoryUnit) -> SourceExtraction:
+        extract = getattr(self._extractor, "extract_for_update", None)
+        if extract is None:
+            raise ValidationError("Configured Schema extractor cannot produce complete updates")
+        return extract(source)
+
+    def source_schema_identity(self) -> tuple[str, str]:
+        identity = getattr(self._extractor, "source_schema_identity", None)
+        if identity is None:
+            raise ValidationError("Configured Schema extractor cannot identify its schema")
+        return identity()
+
+    def prepare_source_update(
+        self, old: MemoryUnit, new: MemoryUnit, *, mode: str
+    ) -> SourceUpdatePlan | None:
+        if old.content == new.content:
+            return None
+        name, version = self.source_schema_identity()
+        if (old.system_metadata.get("schema_name", name) != name
+                or old.system_metadata.get("schema_version", version) != version):
+            raise ValidationError("The source's original Schema configuration has changed")
+        new.system_metadata.update(schema_name=name, schema_version=version)
+        return self._updates.prepare(old, new, mode=mode)
+
+    def commit_source_update(
+        self, plan: SourceUpdatePlan, *, index_for: Callable[[MemoryUnit], IndexBuilder]
+    ) -> MemoryUnit:
+        return self._updates.commit(plan, index_for=index_for)
+
+    def _persist_source_evidence(self, units: list[MemoryUnit]) -> list[str]:
+        created: list[str] = []
+        for unit in units:
+            if load_units(self._source_kv, unit.scope, [unit.id]):
+                continue
+            source = copy.deepcopy(unit)
+            source.system_metadata = dict(source.system_metadata)
+            source.system_metadata.update(
+                {
+                    "memory_role": "source_evidence",
+                    "schema_source_evidence": True,
+                }
+            )
+            if hasattr(self._extractor, "source_schema_identity"):
+                name, version = self.source_schema_identity()
+                source.system_metadata.update(schema_name=name, schema_version=version)
+            source.tags = merge_unit_tags(source.tags, ["source_evidence"])
+            created.extend(self._persist([source]))
+        return created
+
+    def _write_schema_entities_to_sources(
+        self,
+        source_units: list[MemoryUnit],
+        property_units: list[MemoryUnit],
+    ) -> list[str]:
+        """Write extracted entity names back to their persisted sources.
+
+        Only ``schema_entity_name`` is written back. ``schema_property_name`` is
+        intentionally excluded: ``source.entities`` feeds the entity index
+        (``EntityIndexBuilder``) and L2 expansion (``KeywordRecaller``), both of
+        which treat every term as a proper-noun entity. Writing property names
+        there makes a shared property name (e.g. ``hobby_activity``) act as a fake
+        entity that chains together unrelated memories (BUG-ERC-1001). The property
+        is already durably stored on the property unit's own
+        ``schema_property_name`` metadata, so nothing is lost.
+        """
+        source_by_id = {unit.id: unit for unit in source_units}
+        terms_by_source: dict[str, list[str]] = {unit.id: [] for unit in source_units}
+        for property_unit in property_units:
+            entity_name = str(
+                property_unit.system_metadata.get("schema_entity_name") or ""
+            ).strip()
+            if not entity_name:
+                continue
+            referenced_ids = property_unit.provenance
+            if not referenced_ids and property_unit.source_ref:
+                referenced_ids = [property_unit.source_ref]
+            for source_id in referenced_ids:
+                if source_id in source_by_id:
+                    terms_by_source[source_id].append(entity_name)
+
+        updated_ids: list[str] = []
+        for source_id, terms in terms_by_source.items():
+            if not terms:
+                continue
+            input_source = source_by_id[source_id]
+            stored = load_units(self._source_kv, input_source.scope, [source_id])
+            if not stored:
+                logger.warning(
+                    "SchemaOrchestratingEvolver: persisted source %s is missing during writeback",
+                    source_id,
+                )
+                continue
+            source = copy.deepcopy(stored[0])
+            source.entities = list(dict.fromkeys([*source.entities, *terms]))
+            self._index.update([source], mode=IndexWriteMode.ALL)
+            updated_ids.append(source.id)
+        return updated_ids
+
+    def _evolve_extract(self, units: list[MemoryUnit]) -> EvolveResult:
+        if self._is_procedural(units):
+            return super()._evolve_extract(units)
+        if not units:
+            return EvolveResult()
+
+        # Source persistence is the durability boundary and intentionally fails loudly.
+        source_ids = self._persist_source_evidence(units)
+        recent = self._persist_and_maintain_messages(units)
+        context = self._maybe_collect_extract_context(units, recent)
+        try:
+            extracted = self._extractor.extract(units, context=context)
+        except Exception as exc:
+            logger.warning(
+                "SchemaOrchestratingEvolver.schema_extract_degraded: source_units=%d error=%s: %s",
+                len(units),
+                type(exc).__name__,
+                exc,
+            )
+            self.last_schema_error = f"{type(exc).__name__}: {exc}"
+            return EvolveResult(created_ids=source_ids)
+
+        self.last_schema_error = ""
+        if not extracted:
+            return EvolveResult(created_ids=source_ids)
+
+        copy_consolidation_prompts(units, extracted)
+        self._annotate_layers(extracted)
+        if self._schema_entity_resolver is not None:
+            self._schema_entity_resolver.resolve(extracted)
+
+        planner = self._schema_property_merge_planner
+        executor = self._schema_property_merge_executor
+        if planner is not None and executor is not None:
+            execution = executor.apply(planner.plan(extracted))
+            property_ids = execution.created_ids
+            superseded_ids = execution.superseded_ids
+            archived_ids = execution.archived_ids
+        else:
+            property_ids = self._persist(extracted)
+            superseded_ids = []
+            archived_ids = []
+        if self._schema_entity_resolver is not None:
+            try:
+                self._schema_entity_resolver.sync(extracted)
+            except Exception as exc:
+                logger.warning(
+                    "SchemaOrchestratingEvolver: entity registry sync failed; "
+                    "properties remain durable: %s",
+                    exc,
+                )
+        persisted_observations = [
+            unit
+            for unit in extracted
+            if str(unit.system_metadata.get("schema_property_operation") or "set") != "delete"
+        ]
+        source_writeback_ids = self._write_schema_entities_to_sources(
+            units,
+            persisted_observations,
+        )
+        existing_source_updates = [
+            source_id for source_id in source_writeback_ids if source_id not in source_ids
+        ]
+        logger.info(
+            "SchemaOrchestratingEvolver: source=%d properties=%d source_writebacks=%d",
+            len(source_ids),
+            len(property_ids),
+            len(source_writeback_ids),
+        )
+        return EvolveResult(
+            created_ids=[*source_ids, *property_ids],
+            updated_ids=[*existing_source_updates, *archived_ids],
+            superseded_ids=superseded_ids,
+        )
+
+
+def _optional_layer_annotator(config):
+    namespace = config.ctx.namespaces.get(LayerAnnotatorProducer.TOP_NAME, {})
+    if "default" not in namespace:
+        return None
+    return LayerAnnotatorProducer.build_named("default", config.ctx)
+
+
+@EvolverProducer.register("schema_orchestrating")
+def _build(config):
+    vector_on = config.get("vector_enabled", True)
+    index_default = "hybrid" if vector_on else "fulltext"
+    dedup_default = "vector" if vector_on else "keyword"
+    storage = StoreManagerProducer.resolve(config)
+    kv_name = resolve_name(config, "kv_store")
+    kv = storage.kv(kv_name)
+    embedder = EmbedderProducer.dep(config, default="hashing")
+    llm = LlmProducer.dep(config, default="echo")
+    registry = SchemaEntityRegistry(
+        kv,
+        vector_store=(
+            storage.vector("schema_entities")
+            if storage.has_vector("schema_entities")
+            else None
+        ),
+        fulltext_store=(
+            storage.fulltext("schema_entities")
+            if storage.has_fulltext("schema_entities")
+            else None
+        ),
+        embedder=embedder,
+    )
+    resolver = None
+    if as_bool(config.get("schema_entity_resolution_enabled"), default=True):
+        resolver = SchemaEntityResolver(
+            kv=kv,
+            registry=registry,
+            embedder=embedder,
+            llm=llm,
+            enable_merge_decision=as_bool(
+                config.get("schema_entity_merge_decision_enabled"),
+                default=True,
+            ),
+            recall_top_k=int(config.get("schema_entity_recall_top_k", 15)),
+            max_merge_retries=int(config.get("schema_entity_merge_max_retries", 8)),
+            fallback_limit=int(config.get("schema_entity_fallback_limit", 1000)),
+        )
+    property_merge = SchemaPropertyMergePlanner(
+        kv=kv,
+        embedder=embedder,
+        llm=llm,
+        top_k=int(config.get("schema_property_merge_top_k", 5)),
+        fallback_limit=int(config.get("schema_property_merge_fallback_limit", 1000)),
+        merge_enabled=as_bool(config.get("use_property_merge"), default=False),
+    )
+    return SchemaOrchestratingEvolver(
+        extractor=ExtractorProducer.dep(config, default="entity_schema"),
+        abstractor=AbstractorProducer.dep(config, default="concat"),
+        associator=AssociatorProducer.dep(config, default="keyword"),
+        index_builder=IndexBuilderProducer.dep(config, "index_builder", default=index_default),
+        storage=storage,
+        message_store=_resolve_message_store(config),
+        dedup=DedupProducer.dep(config, default=dedup_default),
+        llm=llm,
+        layer_annotator=_optional_layer_annotator(config),
+        schema_entity_resolver=resolver,
+        schema_property_merge_planner=property_merge,
+        kv_name=kv_name,
+        dedup_medium_similarity=config.get("dedup_medium_similarity", 0.7),
+        dedup_high_similarity=config.get("dedup_high_similarity", 0.9),
+    )

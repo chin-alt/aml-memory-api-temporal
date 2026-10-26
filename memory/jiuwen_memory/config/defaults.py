@@ -1,0 +1,332 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+"""内置默认装配配置：离线进程内栈，用**显式具名 + 引用**复刻系统的共享拓扑。
+
+``build_kernel`` 未传 config 时用它装配；传 config 时把用户配置**合并覆盖**到它之上
+（按 namespace/实例名覆盖、globals 按 key 覆盖）。
+
+约定：每种组件在自己的命名空间下声明一个名为 ``default`` 的具名实例；需要**对象共享**的
+有状态后端（kv / vector / fulltext / graph store、audit、scheduler 等）由各消费方**同名引用**
+``default`` → 经 :meth:`Factory.build_named` 命中同一缓存键 → 同一实例。``recaller`` 有三路
+（keyword / vector / graph），故声明三个具名实例。
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .context import AssemblyContext
+
+_D = "default"
+
+# 默认 prompts 段（顶层 ``prompts``）：按 phase/key 命名引用。metadata 只写 key，
+# 运行时由 PromptRegistry 按 key 查文本。这里给出空骨架——具体 prompt 由用户在 yml
+# 里覆盖；空 dict 表示该 phase 下无可用 prompt（consolidate/reflect 步会回退到规则）。
+_PROMPTS_DEFAULT: dict[str, dict[str, str]] = {
+    "extract": {},
+    "consolidate": {},
+    "reflect": {},
+}
+
+
+def default_config_dict() -> dict[str, Any]:
+    """返回内置默认配置（两级命名空间字典）。"""
+    return {
+        "globals": {
+            "schema_enabled": False,
+            # Schema 开启后的 identity 默认统一；属性内容合并保持 opt-in。
+            "schema_entity_resolution_enabled": True,
+            "schema_entity_merge_decision_enabled": True,
+            "use_property_merge": False,
+            # TemporalEntity 是 Schema Property 的只读检索视图；默认不装配，
+            # 不影响普通召回。启用后仍需 query extension 或自动时间分支命中。
+            "schema_temporal_enabled": False,
+            "vector_enabled": True,
+            "graph_enabled": True,
+            "rerank_enabled": True,
+            "embedder_dim": 64,
+            "chunk_size": 120,
+            # 全局唯一 StoreManager 指名（F07）：值为 store_manager 命名空间下的实例名。
+            # 消费者（recaller/retriever/engine/evolver/dedup/lifecycle/governor/
+            # space/job/ingest_job 等）不再逐个声明 storage 引用，统一经
+            # StoreManagerProducer.resolve 读此键取全局共享实例。
+            "store_manager": _D,
+        },
+        # 顶层 prompts 段：按 phase（consolidate/reflect）→ key → prompt 文本。
+        # 与 globals 同级，由 AssemblyContext 抽取到 globals["prompts"] 供
+        # PromptRegistry 加载。metadata 只引用 key，不内联 prompt 文本。
+        "prompts": _PROMPTS_DEFAULT,
+        # -- 存储（有状态，必须对象共享）-------------------------------------- #
+        "kv_store": {_D: "memory"},
+        # 安全 provider：默认声明为 local 信封加密（AES-256-GCM），仅供 opt-in encrypted KV 引用。
+        # F04 §5.4：默认装配不强制包装 EncryptedKVStore；用户配 kv_store.default.target=encrypted
+        # 时由 @KvProducer.register("encrypted") builder 经 SecurityProducer.dep(config) 取此实例。
+        # local provider 的 create_key_file 默认 False：未注入密钥源且 key_file
+        # 不存在时装配 fail-closed。
+        "security": {_D: "local"},
+        "vector_store": {
+            _D: "memory",
+            # Canonical Schema Entity 与 Property MemoryUnit 使用不同物理端口。
+            "schema_entities": "memory",
+            # L0/L1 分表（与构建侧同命名 layers_l0/l1；同后端不同 collection）
+            "layers_l0": "memory",
+            "layers_l1": "memory",
+        },
+        "graph_store": {_D: "memory"},
+        "fulltext_store": {
+            _D: {"target": "memory", "params": {"tokenizer": _D}},
+            "schema_entities": {"target": "memory", "params": {"tokenizer": _D}},
+            # L0/L1 分表（与构建侧同命名 layers_l0/l1）
+            "layers_l0": {"target": "memory", "params": {"tokenizer": _D}},
+            "layers_l1": {"target": "memory", "params": {"tokenizer": _D}},
+        },
+        "store_manager": {
+            _D: {
+                "target": "composite",
+                # manager 段自身不承载数据面配置：七类 Store 端口由 CompositeStoreManager
+                # 扫各 *_store 命名空间全量聚合（声明即端口），与 params 无关。数据面
+                # 的全部装配参数住在 domain_stores.<name> 里。
+                "params": {
+                    # 命名数据面：每套共享同一物理 Store 集，差异只在检索 profile 与
+                    # 真源端口选择。default 必建且是所有命名实例的 overlay base——
+                    # RecallerProducer.dep 读 params 直读不回退 globals，命名 entry 漏
+                    # 抄 *_recaller 键会静默新建一套不共享的 recaller。
+                    "domain_stores": {
+                        _D: {
+                            "kv_store": _D,
+                            "preferred_retrieval_pipeline": "recall_get_rank",
+                            # 召回路装配：CompositeDomainStore.for_manager 按能力开关
+                            #（vector_enabled / graph_enabled / layers_index_enabled，
+                            # 回退 globals）启用各 recaller，构建期同步组装。
+                            # layers_index_enabled 默认 true（与构建侧对齐：默认建默认
+                            # 查）；不在此硬编码，让 get 回退 globals 便于全局关停。
+                            "keyword_recaller": "keyword",
+                            "vector_recaller": "vector",
+                            "graph_recaller": "graph",
+                            "keyword_l0_recaller": "keyword_l0",
+                            "keyword_l1_recaller": "keyword_l1",
+                            "vector_l0_recaller": "vector_l0",
+                            "vector_l1_recaller": "vector_l1",
+                        },
+                    },
+                },
+            }
+        },
+        # -- 共享插件 -------------------------------------------------------- #
+        "tokenizer": {_D: "whitespace"},
+        "embedder": {_D: {"target": "hashing", "params": {"tokenizer": _D}}},
+        "chunker": {_D: "fixed_window"},
+        "feature_extractor": {_D: {"target": "keyword", "params": {"tokenizer": _D}}},
+        "llm": {_D: "echo"},
+        "reranker": {_D: {"target": "overlap", "params": {"tokenizer": _D}}},
+        "normalizer": {_D: "passthrough"},
+        "audit": {_D: {"target": "sqlite", "params": {"db_path": ":memory:"}}},
+        # -- 检索 ------------------------------------------------------------ #
+        "recaller": {
+            "keyword": {"target": "keyword"},
+            "keyword_l0": {"target": "keyword_l0"},
+            "keyword_l1": {"target": "keyword_l1"},
+            "vector": {
+                "target": "vector",
+                "params": {"min_similarity": 0.0},
+            },
+            "vector_l0": {"target": "vector_l0"},
+            "vector_l1": {"target": "vector_l1"},
+            "graph": {"target": "graph"},
+        },
+        "query_parser": {
+            _D: {
+                "target": "simple",
+                "params": {
+                    "tokenizer": _D,
+                    "embedder": _D,
+                    "llm": _D,
+                    "feature_extractor": _D,
+                    "sanitize_enabled": True,
+                    "sanitize_strip_code": False,
+                    "rewrite_enabled": False,
+                },
+            }
+        },
+        "fuser": {_D: "rrf"},
+        "discloser": {_D: "truncating"},
+        "retriever": {
+            _D: {
+                "target": "pipeline",
+                "params": {
+                    "reranker": _D,
+                    "query_parser": _D,
+                    "fuser": _D,
+                    "discloser": _D,
+                    # 召回超采样 + 精排预算 + 相关性阈值（本算子私有调参，非跨切面）
+                    "over_fetch_factor": 4,
+                    "over_fetch_floor": 60,
+                    "recall_max": 100,
+                    "rerank_max": 60,
+                    "min_score": 0.0,
+                    # 相对阈值默认关闭（校准/未校准两路均是）：按最高分比例裁剪会随
+                    # 融合分布变化误杀尾部候选（分层召回下尤甚——有无 layers 属索引
+                    # 覆盖差异，不是相关性差异）。裁剪交由调用方 top_k 决定，需要时
+                    # 按场景显式配置。
+                    "min_score_ratio": 0.0,
+                    "min_score_ratio_uncalibrated": 0.0,
+                    "min_results": 0,
+                    # Schema TemporalEntity 选配检索：Entity/Property 双路、
+                    # 实体内二次筛选、同属性时间线邻居和 Source-first 兜底。
+                    "schema_temporal_auto_enabled": False,
+                    "schema_temporal_entity_top_k": 20,
+                    "schema_temporal_property_top_k": 50,
+                    "schema_temporal_property_top_n": 25,
+                    "schema_temporal_rrf_k": 60,
+                    "schema_temporal_max_properties_per_entity": 20,
+                    "schema_temporal_property_allocation_min_factor": 0.5,
+                    "schema_temporal_property_allocation_max_factor": 1.5,
+                    "schema_temporal_shrink_enabled": True,
+                    "schema_temporal_property_rerank_enabled": True,
+                    "schema_temporal_direct_property_rerank_enabled": False,
+                    "schema_temporal_entity_rerank_enabled": False,
+                    "schema_temporal_entity_rerank_max_chars": 4000,
+                    "schema_temporal_property_extension_step": 3,
+                    # 正式结果为每个 Entity 一条格式化时间线；字符预算按实体独立应用。
+                    "schema_temporal_formatting_enabled": True,
+                    "schema_temporal_formatting_max_chars": 16000,
+                    "schema_temporal_source_fallback_enabled": True,
+                    "schema_temporal_source_policy": "missing_or_incomplete",
+                    "schema_temporal_source_top_k": 20,
+                    "schema_temporal_source_ratio": 0.3,
+                    "schema_temporal_source_max_chars": 1200,
+                },
+            }
+        },
+        # -- 构建 ------------------------------------------------------------ #
+        "extractor": {
+            _D: {
+                "target": "dynamic_llm",
+                "params": {"llm": _D, "fallback": "legacy"},
+            },
+            "legacy": {"target": "keyword", "params": {"chunker": _D}},
+        },
+        "abstractor": {_D: "concat"},
+        "associator": {_D: {"target": "keyword", "params": {"feature_extractor": _D}}},
+        "classifier": {_D: "llm"},  # infer=false 默认路径用 LLM classifier 打 tier+tags
+        "constructor": {
+            _D: {
+                "target": "hybrid",
+                "params": {
+                    "chunker": _D,
+                    "embedder": _D,
+                },
+            }
+        },
+        "dedup": {
+            _D: {
+                "target": "vector",
+                "params": {"embedder": _D},
+            }
+        },
+        "evolver": {
+            _D: {
+                "target": "orchestrating",
+                "params": {
+                    "extractor": _D,
+                    "abstractor": _D,
+                    "associator": _D,
+                    "index_builder": _D,
+                    # 原文 store：指向 kv_store.default，与正排 KV 是同一实例
+                    # （/messages/ 与 /memory/ 靠 key 前缀分离）。要物理拆开，
+                    # 声明另一个 kv_store 具名实例并把此处改成它的名字。
+                    "message_store": _D,
+                    "dedup": _D,
+                    "llm": _D,
+                },
+            },
+            # dynamic：EXTRACT 走动态 prompt 四步编排（extract→consolidate→reflect→落盘）。
+            # 与 orchestrating 平级；装配或 pipeline profile 选它即启用动态路径。
+            "dynamic": {
+                "target": "dynamic",
+                "params": {
+                    "extractor": _D,
+                    "abstractor": _D,
+                    "associator": _D,
+                    "index_builder": _D,
+                    # 原文 store：指向 kv_store.default，与正排 KV 是同一实例
+                    # （/messages/ 与 /memory/ 靠 key 前缀分离）。要物理拆开，
+                    # 声明另一个 kv_store 具名实例并把此处改成它的名字。
+                    "message_store": _D,
+                    "dedup": _D,
+                    "llm": _D,
+                },
+            },
+        },
+        # -- 摄取 ------------------------------------------------------------ #
+        "ingestor": {_D: {"target": "simple", "params": {"normalizer": _D}}},
+        # -- 控制 ------------------------------------------------------------ #
+        "engine": {
+            _D: {
+                "target": "in_memory",
+                "params": {
+                    "ingestor": _D,
+                    "index_builder": _D,
+                    "retriever": _D,
+                    "scheduler": _D,
+                    "evolver": _D,
+                    "lifecycle": _D,
+                    "job_factory": _D,
+                },
+            }
+        },
+        # JobFactory 顶层命名空间：装配期把各 Job 类型的 Spec 注册到 JobFactory。
+        "job_factory": {
+            _D: {
+                "target": "default",
+                "params": {
+                    "evolver": _D,
+                    "lifecycle": _D,
+                    "index_builder": _D,
+                    "llm": _D,
+                    # MiddleToLongJob 业务参数
+                    "middle_max_fetch": 100,    # _list_working_units 取最近 N 条
+                    "middle_batch_size": 10,    # 连续性切批上限
+                    "middle_concurrency": 4,    # 批间并发（1=串行）
+                },
+            }
+        },
+        # scheduler 只接收 Job（Job 自带数据源），无 params。
+        "scheduler": {_D: {"target": "in_process", "params": {}}},
+        "ingest_job": {_D: {"target": "in_process", "params": {}}},
+        "lifecycle": {_D: {"target": "kv", "params": {"policy": _D}}},
+        "policy": {_D: "dict"},
+        "governor": {_D: {"target": "in_memory", "params": {"audit": _D}}},
+        "permission": {_D: {"target": "sqlite", "params": {"db_path": ":memory:"}}},
+        "space": {_D: {"target": "kv", "params": {}}},
+        # 空间授权事实的读取与缓存。params 只引用 space：正查（元数据与成员表）与
+        # 反查（主体到空间）都在 SpaceManager 契约内，本算子只依赖它一个。
+        "membership": {_D: {"target": "kv", "params": {"space": _D}}},
+        # 可插拔配置来源：默认装配快照；产品可覆盖为 dict/overlay/自研 target
+        "config_source": {_D: "yaml_defaults"},
+    }
+
+
+# 根组件（LocalMemoryAPI）对各顶层组件的引用——全部指向各命名空间下的 default 实例。
+# storage 不在此列：全局唯一 StoreManager 经 globals.store_manager 指名，由
+# StoreManagerProducer.resolve 统一解析（Kernel 与各消费者共享同一实例）。
+ROOT_PARAMS: dict[str, str] = {
+    "engine": _D,
+    "permission": _D,
+    "scheduler": _D,
+    "ingest_job": _D,
+    "policy": _D,
+    "governor": _D,
+    "audit": _D,
+    "kv_store": _D,
+    "security": _D,
+    "space": _D,
+    "membership": _D,
+    "config_source": _D,
+}
+
+KV_DEFAULT_NAME = _D  # 注入的真源 kv 预置进缓存时用的具名键（与各处引用一致）
+
+
+def default_context() -> AssemblyContext:
+    """构造内置默认装配上下文。"""
+    return AssemblyContext.from_dict(default_config_dict())

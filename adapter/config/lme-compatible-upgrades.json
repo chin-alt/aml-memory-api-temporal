@@ -1,0 +1,147 @@
+[
+  {
+    "from": "b9435574469c3dc68c0fda6ab3d5729d548e211e3ce1472bed8a668700e82353",
+    "to": "fe3ce7c72cbf7ba4390533d39719c7aec996346cb0715fcbd6ded12c883d0d35",
+    "recorded_at": "2026-09-22T10:16:19.675992+00:00",
+    "reason": "Explicit profile wiring and stronger source fingerprint; Schema-only startup guard now selects the keyword recaller explicitly. Ordinary behavior verified by regression tests. Preserve ordinary completed results; record migration on next resume only."
+  },
+  {
+    "from": "4f9c3d5999f97d5f120067b801b3428ae3412dee3b44aeac2dbc1b7249feda85",
+    "to": "fe3ce7c72cbf7ba4390533d39719c7aec996346cb0715fcbd6ded12c883d0d35",
+    "recorded_at": "2026-09-22T10:27:00+00:00",
+    "reason": "Schema-only startup guard selects KeywordRecaller instead of all L2 recallers; ordinary execution is unchanged. Exact predecessor fingerprint reconstructed and verified."
+  },
+  {
+    "from": "4f9c3d5999f97d5f120067b801b3428ae3412dee3b44aeac2dbc1b7249feda85",
+    "to": "971234189965145f166636047201913ead03cd68d235e7e82a125df5716efd34",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-22T12:28:51.749889+00:00",
+    "reason": "Scheduler-only upgrade: continue after individual failures, optional skip-failed resume and failure summary. Memory extraction, source fallback guard, model settings and repository QA unchanged. Preserve existing completed/failed records."
+  },
+  {
+    "from": "b9435574469c3dc68c0fda6ab3d5729d548e211e3ce1472bed8a668700e82353",
+    "to": "971234189965145f166636047201913ead03cd68d235e7e82a125df5716efd34",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-22T12:28:51.749889+00:00",
+    "reason": "Scheduler-only upgrade: continue after individual failures, optional skip-failed resume and failure summary. Memory extraction, source fallback guard, model settings and repository QA unchanged. Preserve existing completed/failed records."
+  },
+  {
+    "from": "fe3ce7c72cbf7ba4390533d39719c7aec996346cb0715fcbd6ded12c883d0d35",
+    "to": "971234189965145f166636047201913ead03cd68d235e7e82a125df5716efd34",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-22T12:28:51.749889+00:00",
+    "reason": "Scheduler-only upgrade: continue after individual failures, optional skip-failed resume and failure summary. Memory extraction, source fallback guard, model settings and repository QA unchanged. Preserve existing completed/failed records."
+  },
+  {
+    "from": "e71bfddf67c166d99e6aed3fd03563d8dd365249935763630de78e09bcc6d332",
+    "to": "93cf129eca9a409e71ba305bd3679ccc4b1a98e5e4f1abe012fdba6885309097",
+    "memory_profile": "schema-entity",
+    "recorded_at": "2026-09-22T12:28:51.827688+00:00",
+    "reason": "Scheduler-only upgrade: continue after individual failures, optional skip-failed resume and failure summary. Memory extraction, source fallback guard, model settings and repository QA unchanged. Preserve existing completed/failed records."
+  },
+  {
+    "from": "4f9c3d5999f97d5f120067b801b3428ae3412dee3b44aeac2dbc1b7249feda85",
+    "to": "c2cf477d34f5a0bf70810ccfc71287df77d210ec087c73d9899105dd3a6ab07f",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-23T08:13:33.219780+00:00",
+    "reason": "Add separate bm25-fidelity profile. Existing ordinary/schema profiles retain fidelity=false, fuser, models and QA behavior. Report fidelity now reflects explicit HTTP configuration. No cross-profile migration."
+  },
+  {
+    "from": "971234189965145f166636047201913ead03cd68d235e7e82a125df5716efd34",
+    "to": "c2cf477d34f5a0bf70810ccfc71287df77d210ec087c73d9899105dd3a6ab07f",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-23T08:13:33.219780+00:00",
+    "reason": "Add separate bm25-fidelity profile. Existing ordinary/schema profiles retain fidelity=false, fuser, models and QA behavior. Report fidelity now reflects explicit HTTP configuration. No cross-profile migration."
+  },
+  {
+    "from": "b9435574469c3dc68c0fda6ab3d5729d548e211e3ce1472bed8a668700e82353",
+    "to": "c2cf477d34f5a0bf70810ccfc71287df77d210ec087c73d9899105dd3a6ab07f",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-23T08:13:33.219780+00:00",
+    "reason": "Add separate bm25-fidelity profile. Existing ordinary/schema profiles retain fidelity=false, fuser, models and QA behavior. Report fidelity now reflects explicit HTTP configuration. No cross-profile migration."
+  },
+  {
+    "from": "fe3ce7c72cbf7ba4390533d39719c7aec996346cb0715fcbd6ded12c883d0d35",
+    "to": "c2cf477d34f5a0bf70810ccfc71287df77d210ec087c73d9899105dd3a6ab07f",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-23T08:13:33.219780+00:00",
+    "reason": "Add separate bm25-fidelity profile. Existing ordinary/schema profiles retain fidelity=false, fuser, models and QA behavior. Report fidelity now reflects explicit HTTP configuration. No cross-profile migration."
+  },
+  {
+    "from": "93cf129eca9a409e71ba305bd3679ccc4b1a98e5e4f1abe012fdba6885309097",
+    "to": "cb1b3117fd90c5a09cf0b113101873795bcb0297623d4a1d8ee388613b819c89",
+    "memory_profile": "schema-entity",
+    "recorded_at": "2026-09-23T08:13:33.434813+00:00",
+    "reason": "Add separate bm25-fidelity profile. Existing ordinary/schema profiles retain fidelity=false, fuser, models and QA behavior. Report fidelity now reflects explicit HTTP configuration. No cross-profile migration."
+  },
+  {
+    "from": "e71bfddf67c166d99e6aed3fd03563d8dd365249935763630de78e09bcc6d332",
+    "to": "cb1b3117fd90c5a09cf0b113101873795bcb0297623d4a1d8ee388613b819c89",
+    "memory_profile": "schema-entity",
+    "recorded_at": "2026-09-23T08:13:33.434813+00:00",
+    "reason": "Add separate bm25-fidelity profile. Existing ordinary/schema profiles retain fidelity=false, fuser, models and QA behavior. Report fidelity now reflects explicit HTTP configuration. No cross-profile migration."
+  },
+  {
+    "from": "4f9c3d5999f97d5f120067b801b3428ae3412dee3b44aeac2dbc1b7249feda85",
+    "to": "631e66662e15e837c82a51cef29fc24727c66a51219f8aa467ae91730a4cf8a5",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-24T02:19:49.905735+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "971234189965145f166636047201913ead03cd68d235e7e82a125df5716efd34",
+    "to": "631e66662e15e837c82a51cef29fc24727c66a51219f8aa467ae91730a4cf8a5",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-24T02:19:49.905735+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "b9435574469c3dc68c0fda6ab3d5729d548e211e3ce1472bed8a668700e82353",
+    "to": "631e66662e15e837c82a51cef29fc24727c66a51219f8aa467ae91730a4cf8a5",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-24T02:19:49.905735+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "c2cf477d34f5a0bf70810ccfc71287df77d210ec087c73d9899105dd3a6ab07f",
+    "to": "631e66662e15e837c82a51cef29fc24727c66a51219f8aa467ae91730a4cf8a5",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-24T02:19:49.905735+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "fe3ce7c72cbf7ba4390533d39719c7aec996346cb0715fcbd6ded12c883d0d35",
+    "to": "631e66662e15e837c82a51cef29fc24727c66a51219f8aa467ae91730a4cf8a5",
+    "memory_profile": "ordinary",
+    "recorded_at": "2026-09-24T02:19:49.905735+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "93cf129eca9a409e71ba305bd3679ccc4b1a98e5e4f1abe012fdba6885309097",
+    "to": "957ddb4db521b310188b7233de660bd0c5260b4bcbde0da7b4b441d9bc79ec43",
+    "memory_profile": "schema-entity",
+    "recorded_at": "2026-09-24T02:19:50.736464+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "cb1b3117fd90c5a09cf0b113101873795bcb0297623d4a1d8ee388613b819c89",
+    "to": "957ddb4db521b310188b7233de660bd0c5260b4bcbde0da7b4b441d9bc79ec43",
+    "memory_profile": "schema-entity",
+    "recorded_at": "2026-09-24T02:19:50.736464+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "e71bfddf67c166d99e6aed3fd03563d8dd365249935763630de78e09bcc6d332",
+    "to": "957ddb4db521b310188b7233de660bd0c5260b4bcbde0da7b4b441d9bc79ec43",
+    "memory_profile": "schema-entity",
+    "recorded_at": "2026-09-24T02:19:50.736464+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  },
+  {
+    "from": "b29c66bc0ee7ba0c2487a7e0d9db7c0f76b4fff37544c51a122fc6309991f465",
+    "to": "302de825e7a7a857118845b7b620ec5877e9ad14c6b4c0e41fda009902da284e",
+    "memory_profile": "bm25-fidelity",
+    "recorded_at": "2026-09-24T02:19:51.339325+00:00",
+    "reason": "Add isolated score-max-fidelity configuration only. Existing profiles, extraction, retrieval, models and QA unchanged; no cross-profile migration."
+  }
+]

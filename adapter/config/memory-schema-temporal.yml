@@ -1,0 +1,43 @@
+# PR #341 / 98ac517: Schema Property memory plus mandatory TemporalEntity retrieval.
+# The adapter injects an explicit temporal query into every public Search. General
+# questions use history mode; deterministic event-time windows use range mode.
+globals:
+  schema_temporal_enabled: true
+  schema_temporal_force_enabled: true
+
+# Canonical Schema Entity projections must be persistent.  The repository defaults
+# for these named ports are in-memory stores, which are unsuitable for deployment.
+fulltext_store:
+  schema_entities:
+    target: elasticsearch
+    params:
+      hosts: "${AML_ES_URL}"
+      index: "${AML_SCHEMA_ENTITY_ES_INDEX:-aml_schema_entity_text_v1}"
+      refresh: "wait_for"
+vector_store:
+  schema_entities:
+    target: milvus
+    params:
+      uri: "${AML_MILVUS_URI}"
+      collection: "${AML_SCHEMA_ENTITY_MILVUS_COLLECTION:-aml_schema_entity_vector_v1}"
+      dim: 1024
+      metric_type: COSINE
+      consistency_level: Strong
+
+retriever:
+  default:
+    params:
+      schema_temporal_auto_enabled: true
+      schema_temporal_entity_top_k: 20
+      schema_temporal_property_top_k: 50
+      schema_temporal_property_top_n: 25
+      schema_temporal_rrf_k: 60
+      schema_temporal_max_properties_per_entity: 20
+      schema_temporal_property_extension_step: 3
+      schema_temporal_formatting_enabled: true
+      schema_temporal_formatting_max_chars: 16000
+      schema_temporal_source_fallback_enabled: true
+      schema_temporal_source_policy: missing_or_incomplete
+      schema_temporal_source_top_k: 20
+      schema_temporal_source_ratio: 0.3
+      schema_temporal_source_max_chars: 1200

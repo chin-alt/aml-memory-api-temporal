@@ -1,0 +1,212 @@
+# agent-memory docker compose config using remote embedding/rerank HTTP services.
+#
+# Local bge model files and Docker volumes may still exist for rollback, but this
+# config does not load them. Embedding uses the OpenAI-compatible /v1/embeddings
+# endpoint; rerank uses the Cohere-style /rerank endpoint.
+profile: docker
+
+memory_api:
+  globals:
+    vector_enabled: true
+    graph_enabled: false
+    rerank_enabled: true
+    entity_enabled: false       # Entity-linked memory master switch: write side (HybridIndexBuilder)
+                                # builds the entity reverse index; recall side (KeywordRecaller) takes
+                                # the manager's ENTITY port for L2 entity expansion. Set true to enable;
+                                # false skips both consumers (the port is still assembled and joins
+                                # health; drop the entity_store section below to skip assembly too).
+                                # Default off — full pipeline also needs unit.entities plaintext filled
+                                # (LLM extraction upstream).
+
+    # bge-m3 dense dimension. Must match the Milvus collection dim.
+    embedder_dim: 1024
+    chunk_size: 512
+
+    # LLM: DashScope OpenAI-compatible endpoint.
+    llm_model: "${LLM_MODEL:-qwen-plus}"
+    llm_base_url: "${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+    llm_api_key: "${LLM_API_KEY}"
+    llm_temperature: 0.0
+    # SSL：ssl_verify 只控制是否接管信任锚，加密开关在 base_url 的 scheme。
+    # 关闭（默认）时完全不干预——http:// 明文直连便于开发自测，https:// 仍走 SDK
+    # 默认的公共 CA 校验。开启后 base_url 必须是 https://，否则装配阶段报错；
+    # 公网端点留空 ssl_ca_cert 即可（公共 CA），私有部署自签时给出容器内证书路径。
+    llm_ssl_verify: "${LLM_SSL_VERIFY:-false}"
+    llm_ssl_ca_cert: "${LLM_SSL_CA:-}"
+
+    # Remote bge-m3 embedding service. Base URL must include /v1 because the
+    # OpenAI client appends /embeddings. No public default is provided: memory
+    # content must only be sent to the endpoint explicitly configured in .env.
+    embedder_model: "${EMBEDDER_MODEL:-bge-m3}"
+    embedder_base_url: "${EMBEDDER_BASE_URL}"
+    embedder_api_key: "${MODEL_API_TOKEN}"
+    embedder_max_batch: 16
+    embedder_ssl_verify: "${EMBEDDER_SSL_VERIFY:-false}"
+    embedder_ssl_ca_cert: "${EMBEDDER_SSL_CA:-}"
+
+    # Remote bge-reranker service. Base URL must not include /rerank because the
+    # api reranker appends it for the Cohere dialect.
+    reranker_model: "${RERANKER_MODEL:-bge-reranker-v2-m3}"
+    reranker_base_url: "${RERANKER_BASE_URL}"
+    reranker_api_key: "${MODEL_API_TOKEN}"
+    reranker_dialect: "${RERANKER_DIALECT:-cohere}"
+    reranker_timeout: 120.0
+    reranker_ssl_verify: "${RERANKER_SSL_VERIFY:-false}"
+    reranker_ssl_ca_cert: "${RERANKER_SSL_CA:-}"
+
+    policies:
+      rerank.enabled: "true"
+
+  llm:
+    default:
+      target: dashscope
+      params:
+        enable_thinking: "${LLM_ENABLE_THINKING:-false}"
+  embedder:
+    default: { target: openai }
+  reranker:
+    default: { target: api }
+  tokenizer:
+    default: { target: jieba }
+
+  kv_store:
+    default:
+      target: redis
+      params:
+        url: "${REDIS_URL:-redis://redis:6379/0}"
+        # SSL：ssl_verify 只管**是否校验服务端证书**，加密开关在 url 的 scheme 上——
+        # 接云端实例须把 url 换成 rediss://，否则 ssl_verify=true 会在装配阶段报错。
+        # ssl_ca_cert 为云厂商控制台下载的 CA 证书路径（容器内可读），开启时必填。
+        ssl_verify: "${REDIS_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${REDIS_SSL_CA:-}"
+  fulltext_store:
+    default:
+      target: elasticsearch
+      params:
+        hosts: "${ES_HOSTS:-http://elasticsearch:9200}"
+        index: "${ES_INDEX:-agent_memory_fulltext}"
+        # 建索引期文本分析器，决定 BM25 匹配的词条形态（查询侧自动同规则）。
+        # 按记忆内容的主语言选择，经 ES_TEXT_ANALYZER 环境变量覆盖：
+        # - 英文记忆: english（ES 内置，词干化 attended→attend + 去停用词）
+        # - 中文记忆: ik_max_word（需 ES 安装 analysis-ik 插件，中文分词效果最好）；
+        #   无法装插件时用 cjk（ES 内置，CJK 二元切分，优于 standard 的单字切分）
+        # - 中英混合: ik_max_word（保留完整英文单词，但无英文词干化）；
+        #   或置空回退 standard（英文不词干化、中文按单字切分，即本参数引入前的行为）
+        # 注意：仅索引创建时生效，变更后需删除旧索引重建才能应用。
+        text_analyzer: "${ES_TEXT_ANALYZER:-english}"
+        # SSL：加密开关在 hosts 的 scheme 上（须为 https://）；证书只能走本参数——
+        # elasticsearch-py 解析 hosts 时不读 query，写进 URL 会被静默丢弃。
+        ssl_verify: "${ES_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${ES_SSL_CA:-}"
+    # L0/L1 与 L2 使用同一 ES 后端和 analyzer，但分别落独立 index。
+    # 三层同通道分数统一按「越大越相关」归并。
+    layers_l0:
+      target: elasticsearch
+      params:
+        hosts: "${ES_HOSTS:-http://elasticsearch:9200}"
+        index: "${ES_INDEX_L0:-agent_memory_fulltext_l0}"
+        text_analyzer: "${ES_TEXT_ANALYZER:-english}"
+        ssl_verify: "${ES_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${ES_SSL_CA:-}"
+    layers_l1:
+      target: elasticsearch
+      params:
+        hosts: "${ES_HOSTS:-http://elasticsearch:9200}"
+        index: "${ES_INDEX_L1:-agent_memory_fulltext_l1}"
+        text_analyzer: "${ES_TEXT_ANALYZER:-english}"
+        ssl_verify: "${ES_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${ES_SSL_CA:-}"
+  vector_store:
+    default:
+      target: milvus
+      params:
+        uri: "${MILVUS_URI:-http://milvus:19530}"
+        collection: "${MILVUS_COLLECTION:-agent_memory_vectors}"
+        dim: 1024
+        metric_type: COSINE
+        # SSL：milvus 的开关是参数形态（内部置 secure=True），uri 用 http/https 皆可。
+        # 单向 TLS 的证书最终落到 server_pem_path，见 milvus_vector._build。
+        ssl_verify: "${MILVUS_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${MILVUS_SSL_CA:-}"
+    # L0/L1 与 L2 使用同一 embedding 维度与 COSINE 度量，分别落独立 collection。
+    layers_l0:
+      target: milvus
+      params:
+        uri: "${MILVUS_URI:-http://milvus:19530}"
+        collection: "${MILVUS_COLLECTION_L0:-agent_memory_vectors_l0}"
+        dim: 1024
+        metric_type: COSINE
+        # SSL：milvus 的开关是参数形态（内部置 secure=True），uri 用 http/https 皆可。
+        # 单向 TLS 的证书最终落到 server_pem_path，见 milvus_vector._build。
+        ssl_verify: "${MILVUS_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${MILVUS_SSL_CA:-}"
+    layers_l1:
+      target: milvus
+      params:
+        uri: "${MILVUS_URI:-http://milvus:19530}"
+        collection: "${MILVUS_COLLECTION_L1:-agent_memory_vectors_l1}"
+        dim: 1024
+        metric_type: COSINE
+        # SSL：milvus 的开关是参数形态（内部置 secure=True），uri 用 http/https 皆可。
+        # 单向 TLS 的证书最终落到 server_pem_path，见 milvus_vector._build。
+        ssl_verify: "${MILVUS_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${MILVUS_SSL_CA:-}"
+
+  # ---- Entity reverse index (ES; the StoreManager ENTITY port = 7th StorageCapability).
+  # Ports are aggregated from their namespaces (declare = expose): declaring default here
+  # therefore makes it the manager's ENTITY default port; do NOT add a store_manager
+  # section for this — instance-level override replaces defaults.py's
+  # store_manager.default.params wholesale (including the whole domain_stores section:
+  # preferred retrieval pipeline, the kv_store source-of-truth port and every *_recaller
+  # selector key), and a missed key silently drops a recall channel.
+  # ES builder returns None when hosts unset → no ENTITY capability → both sides degrade
+  # off automatically (no error). Once declared and constructed, this port joins
+  # manager.health() aggregation: an unreachable entity ES makes health fail (write/recall
+  # main paths are unaffected — both sides keep their try/except guards).
+  # entity_text plaintext is never persisted (sha256 hash only); can share the same ES
+  # cluster with fulltext_store but lands in a separate index.
+  entity_store:
+    default:
+      target: elasticsearch
+      params:
+        hosts: "${ES_HOSTS:-http://elasticsearch:9200}"
+        index: "${ES_ENTITY_INDEX:-memory_entities}"
+        # entity index uses space_id as ES routing (forces _routing.required); does not use
+        # fulltext analyzer (exact hash match, no token analysis). SSL mirrors fulltext_store.
+        ssl_verify: "${ES_SSL_VERIFY:-false}"
+        ssl_ca_cert: "${ES_SSL_CA:-}"
+
+  # constructor (index_builder): instance-level override replaces default params wholesale,
+  # so chunker/embedder must all be restated.
+  constructor:
+    default:
+      target: hybrid
+      params:
+        chunker: default
+        embedder: default
+        # ENTITY port selection key: the value is a manager port name (not a Producer
+        # reference); read from params only (no globals fallback), defaults to "default".
+        # Whether the entity chain runs is governed separately by globals.entity_enabled.
+        # Both sides take the same port off the same manager — instance sharing is
+        # guaranteed by the manager, not by config discipline.
+        entity_store: default
+
+  # recaller.keyword named instance: instance-level override replaces default recaller.keyword
+  # params wholesale.
+  recaller:
+    keyword:
+      target: keyword
+      params:
+        entity_store: default      # same ENTITY port selection key (recall-side L2 expansion)
+    # keyword_l0/keyword_l1/vector* retain defaults.py defaults (not restated here to avoid
+    # wholesale-replace field loss)
+
+  # Keep query text unchanged: rewrite_enabled controls LLM rewriting (default off).
+  query_parser:
+    default:
+      target: simple
+      params:
+        tokenizer: default
+        embedder: default
+        llm: { target: echo }
+        rewrite_enabled: false

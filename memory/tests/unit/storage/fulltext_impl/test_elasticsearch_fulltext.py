@@ -1,0 +1,327 @@
+"""Elasticsearch fulltext store 的索引 mapping 单测试。"""
+
+from __future__ import annotations
+
+import sys
+from types import ModuleType
+
+import pytest
+
+from jiuwen_memory.common.errors import BackendError
+from jiuwen_memory.common.type_def import Scope
+from jiuwen_memory.storage.fulltext_impl.elasticsearch_fulltext import ElasticsearchFulltextStore
+from jiuwen_memory.storage.types import Document, TextQuery
+
+pytestmark = pytest.mark.unit
+
+
+class _FakeIndices:
+    def __init__(self, *, exists: bool = False) -> None:
+        self._exists = exists
+        self.create_error: Exception | None = None
+        self.created: dict | None = None
+        self.updated: dict | None = None
+        self.analyzed: dict | None = None
+        self.analyze_tokens: list[str] = []
+
+    def exists(self, *, index: str) -> bool:
+        return self._exists
+
+    def create(self, **kwargs) -> None:
+        if self.create_error is not None:
+            raise self.create_error
+        self.created = kwargs
+
+    def put_mapping(self, **kwargs) -> None:
+        self.updated = kwargs
+
+    def analyze(self, **kwargs) -> dict:
+        self.analyzed = kwargs
+        return {"tokens": [{"token": token} for token in self.analyze_tokens]}
+
+
+class _FakeClient:
+    def __init__(self, *, index_exists: bool = False) -> None:
+        self.indices = _FakeIndices(exists=index_exists)
+        self.documents: dict[str, dict] = {}
+        self.searches: list[dict] = []
+        self.bulk_calls: list[dict] = []
+        self.delete_by_queries: list[dict] = []
+        self.bulk_failures: list[dict] = []  # 每个 bulk item 强制返回的错误项
+
+    def bulk(self, *, operations: list[dict], refresh: str) -> dict:
+        self.bulk_calls.append({"operations": operations, "refresh": refresh})
+        items: list[dict] = []
+        offset = 0
+        while offset < len(operations):
+            action = operations[offset]
+            if "create" in action:
+                self.documents[action["create"]["_id"]] = operations[offset + 1]
+                items.append({"create": {"_id": action["create"]["_id"], "status": 201}})
+                offset += 2
+            else:
+                doc_id = action["delete"]["_id"]
+                found = doc_id in self.documents
+                self.documents.pop(doc_id, None)
+                items.append(
+                    {"delete": {"_id": doc_id, "status": 200 if found else 404}}
+                )
+                offset += 1
+        if self.bulk_failures:
+            items.extend(self.bulk_failures.pop(0))
+            return {"errors": True, "items": items}
+        return {"errors": False, "items": items}
+
+    def delete_by_query(self, **kwargs) -> dict:
+        self.delete_by_queries.append(kwargs)
+        return {"took": 0, "total": 0, "deleted": 0}
+
+    def mget(self, *, index: str, ids: list[str]) -> dict:
+        return {
+            "docs": [
+                (
+                    {"_id": doc_id, "found": True, "_source": self.documents[doc_id]}
+                    if doc_id in self.documents
+                    else {"_id": doc_id, "found": False}
+                )
+                for doc_id in ids
+            ]
+        }
+
+    def search(self, **kwargs) -> dict:
+        self.searches.append(kwargs)
+        return {"hits": {"hits": []}}
+
+
+def test_text_analyzer_is_written_to_index_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient()
+
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+
+    store = ElasticsearchFulltextStore(index="memory_l0", text_analyzer="english")
+    assert store.client is client
+
+    assert client.indices.created is not None
+    text_mapping = client.indices.created["mappings"]["properties"]["text"]
+    assert text_mapping == {"type": "text", "analyzer": "english"}
+    metadata_mapping = client.indices.created["mappings"]["properties"]["metadata"]
+    assert metadata_mapping == {"type": "object"}
+    date_template = client.indices.created["mappings"]["dynamic_templates"][0]
+    assert date_template == {
+        "metadata_dates_as_keyword": {
+            "path_match": "metadata.*",
+            "match_mapping_type": "date",
+            "mapping": {"type": "keyword"},
+        }
+    }
+    string_template = client.indices.created["mappings"]["dynamic_templates"][1]
+    assert string_template == {
+        "metadata_strings_as_keyword": {
+            "path_match": "metadata.*",
+            "match_mapping_type": "string",
+            "mapping": {"type": "keyword"},
+        }
+    }
+    array_marker = client.indices.created["mappings"]["properties"]["metadata_array_fields"]
+    assert array_marker == {"type": "keyword"}
+
+
+def test_existing_index_gets_array_marker_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient(index_exists=True)
+
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+
+    store = ElasticsearchFulltextStore(index="memory_l0")
+    assert store.client is client
+    assert client.indices.created is None
+    assert client.indices.updated == {
+        "index": "memory_l0",
+        "properties": {"metadata_array_fields": {"type": "keyword"}},
+    }
+
+
+def test_concurrent_index_creation_tolerates_already_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    client.indices.create_error = RuntimeError(
+        "resource_already_exists_exception: index already exists"
+    )
+
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+
+    store = ElasticsearchFulltextStore(index="memory_l0")
+    assert store.client is client
+    assert client.indices.created is None
+    assert client.indices.updated == {
+        "index": "memory_l0",
+        "properties": {"metadata_array_fields": {"type": "keyword"}},
+    }
+
+
+def test_index_creation_other_error_wraps_backend_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    client.indices.create_error = RuntimeError("connection failed")
+
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+
+    store = ElasticsearchFulltextStore(index="memory_l0")
+    with pytest.raises(BackendError, match="elasticsearch connect: connection failed"):
+        store.client
+    assert client.indices.updated is None
+
+
+def test_source_records_array_metadata_keys_without_exposing_them_as_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+
+    store = ElasticsearchFulltextStore()
+    scope = Scope(org="acme")
+    metadata = {"project": "alpha", "tags": ["work", "urgent"]}
+    store.insert(
+        scope,
+        [Document(id="a", text="doc", metadata=metadata)],
+    )
+
+    source = next(iter(client.documents.values()))
+    assert source["metadata"] == metadata
+    assert source["metadata_array_fields"] == ["tags"]
+    assert store.get(scope, ["a"])[0].metadata == metadata
+
+
+def test_search_filters_stopwords_from_es_analyzed_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    client.indices.analyze_tokens = ["这", "本书", "是", "讲", "什么", "的"]
+
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+
+    store = ElasticsearchFulltextStore(index="memory_zh")
+    result = store.search(Scope(org="acme"), TextQuery(text="这本书是讲什么的"))
+
+    assert result == []
+    assert client.indices.analyzed == {
+        "index": "memory_zh",
+        "field": "text",
+        "text": "这本书是讲什么的",
+    }
+    keyword_query = client.searches[0]["query"]["bool"]["must"][0]
+    assert keyword_query == {
+        "bool": {
+            "should": [
+                {"term": {"text": "本书"}},
+                {"term": {"text": "讲"}},
+                {"term": {"text": "什么"}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
+
+def test_search_returns_empty_when_query_contains_only_stopwords(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    client.indices.analyze_tokens = ["这", "是", "的"]
+
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+
+    store = ElasticsearchFulltextStore(index="memory_zh")
+    result = store.search(Scope(org="acme"), TextQuery(text="这是的"))
+
+    assert result == []
+    assert client.searches == []
+
+
+def _store_with_fake_client(
+    monkeypatch: pytest.MonkeyPatch, client: _FakeClient
+) -> ElasticsearchFulltextStore:
+    def create_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return client
+
+    elasticsearch = ModuleType("elasticsearch")
+    elasticsearch.Elasticsearch = create_client
+    monkeypatch.setitem(sys.modules, "elasticsearch", elasticsearch)
+    store = ElasticsearchFulltextStore(index="memory_ft")
+    assert store.client is client
+    return store
+
+
+def test_delete_uses_realtime_bulk_delete_by_physical_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """delete 必须走按物理 _id 的 bulk delete（实时可见），不得用 delete_by_query。
+
+    delete_by_query 是搜索类 API，只能看到已 refresh 的文档；与 insert 的 bulk
+    create（实时可见）组合时，"写入后 ~1s 内删后重建" 会静默删 0 条并 409。
+    不存在的 id 走 not_found（不置 errors、不抛错），幂等契约保持。
+    """
+    client = _FakeClient()
+    store = _store_with_fake_client(monkeypatch, client)
+    scope = Scope(org="acme", space="s1", user="u1", agent="a1", session="ss1")
+
+    store.insert(scope, [Document(id="m1", text="hello", metadata={})])
+    store.delete(scope, ["m1"])
+    store.delete(scope, ["m1", "never-existed"])  # 已删 + 从未存在：均不得抛错
+
+    assert client.delete_by_queries == [], "delete 不得走 delete_by_query（近实时可见性缝隙）"
+    assert len(client.bulk_calls) == 3, "delete 应各发起一次 bulk 调用"
+    delete_call = client.bulk_calls[1]
+    doc_id = getattr(type(store), "_doc_id")(scope, "m1")
+    assert delete_call["operations"] == [
+        {"delete": {"_index": "memory_ft", "_id": doc_id}}
+    ], "按物理 _id 精确删，隔离由 _doc_id 的五段 scope 编码保证"
+    assert delete_call["refresh"] == "false", "refresh 参数透传"
+
+
+def test_delete_raises_backend_error_on_failed_bulk_item(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bulk 置 errors 时，非 not_found 的失败项必须抛 BackendError。"""
+    client = _FakeClient()
+    client.bulk_failures = [[{"delete": {"_id": "x", "status": 500, "error": "boom"}}]]
+    store = _store_with_fake_client(monkeypatch, client)
+
+    with pytest.raises(BackendError, match="elasticsearch delete failed"):
+        store.delete(Scope(org="acme"), ["m1"])

@@ -1,0 +1,20 @@
+[
+  {
+    "path": "outputs\\clbench\\ordinary-20261010-034556-6e629b68\\state.json",
+    "profile": "ordinary",
+    "from": "c2631fdda348f2121f188ff9dfcfe5e366ca8e5c5b56ea10fc0f41f0957619c5",
+    "current": "152140221e42b678c69a6eeef798978a5dee4aaf368ef619ad733e26a887334a"
+  },
+  {
+    "path": "outputs\\clbench\\ordinary-20261010-043312-1a5595c8\\state.json",
+    "profile": "ordinary",
+    "from": "c2631fdda348f2121f188ff9dfcfe5e366ca8e5c5b56ea10fc0f41f0957619c5",
+    "current": "152140221e42b678c69a6eeef798978a5dee4aaf368ef619ad733e26a887334a"
+  },
+  {
+    "path": "outputs\\clbench\\schema-entity-20261010-034614-b1cba954\\state.json",
+    "profile": "schema-entity",
+    "from": "d7144b03e700d4e01e7f95e7f7355aa305ae91f1b0d6f5a354211522f66eb7c6",
+    "current": "413fbe64eb8cc4d754ef1d678674e53609fe552be81451b99b2803a47388af10"
+  }
+]

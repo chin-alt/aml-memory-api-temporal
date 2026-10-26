@@ -1,0 +1,11 @@
+﻿.git
+.env
+server.env
+**/*.local.env
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/outputs
+**/state

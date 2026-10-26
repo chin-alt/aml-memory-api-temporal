@@ -1,0 +1,100 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "JiuwenMemory"
+version = "0.2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "cryptography>=42",
+    "numpy>=1.24",
+    "openai>=1.0",
+    "jieba>=0.42",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-cov>=6.0,<7.0",
+    "ruff>=0.8",
+    # 测试套件自身消费的三个未声明依赖（test_outbound_ssl / test_multimodal_adapter /
+    # test_middle_e2e_real_llm），缺失会让 pytest 卡在 collection error。
+    "httpx>=0.27,<1",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+]
+nlp = [
+    "spacy>=3.7",
+    "hanlp>=2.1",
+]
+embed = [
+    "FlagEmbedding>=1.2",
+    "torch>=2.0",
+    # transformers 5.x 移除了 FlagReranker 仍调用的 prepare_for_model，会令 bge reranker 崩；固定在 4.x。
+    "transformers>=4.39,<5",
+]
+multimodal = [
+    "dashscope>=1.24.0",
+    # video_asr 归一化经 HTTP 拉取转写结果（函数级惰性 import）。
+    "requests>=2.31",
+]
+# 接真后端部署所需的客户端库（Milvus / Elasticsearch / Redis / PostgreSQL）+ YAML 配置解析。
+deploy = [
+    "pymilvus>=2.4",
+    "elasticsearch>=8,<9",
+    "redis>=5",
+    "asyncpg>=0.30",
+    "pyyaml>=6",
+    # api_reranker 出站 HTTP（部署镜像走外部 rerank 服务时必需）。
+    "httpx>=0.27,<1",
+]
+# MCP surface（jiuwen_memory_entry/mcp_server）：把记忆动词暴露为 Model Context Protocol 工具。
+mcp = [
+    "mcp>=1.2",
+    "pyyaml>=6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-cov>=6.0,<7.0",
+    "ruff>=0.8",
+    "httpx>=0.27,<1",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+]
+
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "jiuwen_memory*",
+    "jiuwen_memory_adapter*",
+    "jiuwen_memory_entry*",
+]
+exclude = [
+    "jiuwen_memory_entry.cli*",
+    "jiuwen_memory_entry.mcp_server*",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra -q"
+markers = [
+    "unit: fast unit and contract tests",
+    "integration: multi-component integration tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

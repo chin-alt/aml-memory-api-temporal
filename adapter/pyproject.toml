@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aml-mem2-adapter"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.111,<1", "uvicorn>=0.29,<1", "httpx>=0.27,<1", "pydantic>=2.7,<3", "python-dotenv>=1,<2"]
+
+[tool.setuptools.packages.find]
+include = ["aml_adapter*"]

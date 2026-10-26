@@ -1,0 +1,14 @@
+[
+  {
+    "batch": "outputs\\personamem-v2\\ordinary-20260924-093229-d787ad83",
+    "profile": "ordinary",
+    "from": "04768b7335464f4b190211161641174b00f7ac6ad444d2975d197d9015b869e5",
+    "verified_current": "89e80a70ab12025523e122ba4a46c5cce341a65b6e47007abba89b330c500893"
+  },
+  {
+    "batch": "outputs\\personamem-v2\\schema-entity-20261008-122809-d335c9a5",
+    "profile": "schema-entity",
+    "from": "25ef3a122a63d0003e0e69df10cd40a6e063ad6d33304871742072390da63868",
+    "verified_current": "25ef3a122a63d0003e0e69df10cd40a6e063ad6d33304871742072390da63868"
+  }
+]

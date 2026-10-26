@@ -1,0 +1,14 @@
+{$AML_PUBLIC_DOMAIN} {
+    encode zstd gzip
+    request_body {
+        max_size 16MB
+    }
+    reverse_proxy api:8000 {
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 30m
+            read_timeout 30m
+            write_timeout 30m
+        }
+    }
+}
