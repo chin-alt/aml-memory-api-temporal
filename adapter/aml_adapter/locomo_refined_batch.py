@@ -480,7 +480,8 @@ def write_summary(output: Path, state: dict, conversation_ids: list[str] | None 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity"), default="ordinary")
+    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity", "schema-temporal"),
+                        default="ordinary")
     parser.add_argument("--experiment", choices=("smoke16", "pilot120", "full"), default="pilot120")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--top-k", type=int, default=100)

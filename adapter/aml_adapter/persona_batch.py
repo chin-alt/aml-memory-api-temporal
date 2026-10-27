@@ -97,7 +97,7 @@ def stop_owned_process(process):
 def memory_server(output, profile, namespace, env, allow_http, max_concurrency=1):
     config = memory_config(profile)
     config["globals"].update(model_transport_overrides(env, allow_http))
-    if profile == "schema-entity":
+    if profile in ("schema-entity", "schema-temporal"):
         params = config["extractor"]["default"]["params"]
         frozen = output / "schema.json"
         frozen.write_bytes(Path(params["schema_path"]).read_bytes())
@@ -431,7 +431,8 @@ def compare(paths):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity"), default="ordinary")
+    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity", "schema-temporal"),
+                        default="ordinary")
     parser.add_argument("--env-file", default=str(ROOT / "config/longmemeval.local.env"))
     parser.add_argument("--mode", choices=("both", "mcq", "generative"), default="both")
     parser.add_argument("--top-k", type=int, default=100)

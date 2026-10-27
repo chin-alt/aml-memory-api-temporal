@@ -405,7 +405,8 @@ def compare(paths):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity"), default="ordinary")
+    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity", "schema-temporal"),
+                        default="ordinary")
     parser.add_argument("--size", choices=("100K",), default="100K")
     parser.add_argument("--conversations", type=int, default=1)
     parser.add_argument("--extend-conversations", type=int)

@@ -246,7 +246,8 @@ def compare(paths):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity"), default="ordinary")
+    parser.add_argument("--memory-profile", choices=("ordinary", "schema-entity", "schema-temporal"),
+                        default="ordinary")
     parser.add_argument("--per-category", type=int, default=1)
     parser.add_argument("--sampling", choices=("smoke", "stratified"), default="smoke")
     parser.add_argument("--top-k", type=int, default=100)

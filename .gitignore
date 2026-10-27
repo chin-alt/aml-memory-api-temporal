@@ -8,3 +8,6 @@ __pycache__/
 .venv/
 outputs/
 state/
+adapter/data/
+adapter/vendor/
+adapter/outputs/

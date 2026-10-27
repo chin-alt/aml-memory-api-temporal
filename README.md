@@ -73,6 +73,13 @@ memory evidence in `data` and never generates the final benchmark answer.
 
 See `openapi.json` for exact request and response schemas.
 
+## Benchmark scripts
+
+Five reproducible text-benchmark launchers are included for LongMemEval, PersonaMem-v2, CL-Bench,
+BEAM, and LoCoMo-Refined. See [BENCHMARKS.md](BENCHMARKS.md) for setup, one-line commands, official
+data sources, checkpoints, and output locations. The launchers are fixed to this repository's
+`schema-temporal` profile, so every Search uses the forced temporal dual-recall path.
+
 ## Source and attribution
 
 JiuwenMemory was originally developed by openJiuwen and is distributed under Apache-2.0. The upstream
